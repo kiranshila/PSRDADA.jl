@@ -103,23 +103,33 @@ function next(wb::WriteBufferIterator)
 end
 
 """
-    data_read(client)
+    read_iter(client)
 
-Get a read-only iterable over the data blocks
+Get a read-only iterable over the blocks set by `type`.
+- `type`: Either `:data` (default) or `:header`
 """
-function data_read(client::DadaClient)
-    ReadBufferIterator(client.data)
+function read_iter(client::DadaClient; type=:data)
+    if type == :data
+        ReadBufferIterator(client.data)
+    elseif type == :header
+        ReadBufferIterator(client.header)
+    end
 end
 
 
 """
-    data_write(client)
+write_iter(client)
 
-Get a writeable iterable over the data blocks
+Get a writeable iterable over the blocks set by `type`.
+- `type`: Either `:data` (default) or `:header`
 """
-function data_write(client::DadaClient)
-    WriteBufferIterator(client.data)
+function write_iter(client::DadaClient; type=:data)
+    if type == :data
+        WriteBufferIterator(client.data)
+    elseif type == :header
+        WriteBufferIterator(client.header)
+    end
 end
 
 # Export our API
-export DadaClient, client_connect, client_create, data_read, data_write, data_size, data_count, header_size, header_count, next
+export DadaClient, client_connect, client_create, read_iter, write_iter, data_size, data_count, header_size, header_count, next
