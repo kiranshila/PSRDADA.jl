@@ -3,15 +3,12 @@ mutable struct DadaClient
     allocated::Bool
     header::Ref{ipcbuf_t}
     data::Ref{ipcbuf_t}
-    function DadaClient(key, allocated, header, data)
-        c = new(key, allocated, header, data)
-        function cleanup(c)
-            if c.allocated
-                ipcbuf_destroy(header)
-                ipcbuf_destroy(data)
-            end
-        end
-        finalizer(cleanup, c)
+end
+
+function cleanup(client::DadaClient)
+    if client.allocated
+        ipcbuf_destroy(client.header)
+        ipcbuf_destroy(client.data)
     end
 end
 
@@ -48,20 +45,32 @@ function client_create(key::Integer, data_size::Integer, data_count::Integer, he
     DadaClient(key, true, header, data)
 end
 
+function with_client(f::Function, key::Integer)
+    client = client_connect(key)
+    f(client)
+    cleanup(client)
+end
+
+function with_client(f::Function, key::Integer, data_size::Integer, data_count::Integer, header_size::Integer, header_count::Integer)
+    client = client_create(key, data_size, data_count, header_size, header_count)
+    f(client)
+    cleanup(client)
+end
+
 mutable struct ReadBufferIterator
     buf::Ref{ipcbuf_t}
     holding_block::Bool
     function ReadBufferIterator(buf)
-        rb = new(buf, false)
         ipcbuf_lock_read(buf)
-        function cleanup(rb)
-            if rb.holding_block
-                ipcbuf_mark_cleared(rb.buf)
-            end
-            ipcbuf_unlock_read(rb.buf)
-        end
-        finalizer(cleanup, rb)
+        new(buf, false)
     end
+end
+
+function cleanup(rb::ReadBufferIterator)
+    if rb.holding_block
+        ipcbuf_mark_cleared(rb.buf)
+    end
+    ipcbuf_unlock_read(rb.buf)
 end
 
 function next(rb::ReadBufferIterator)
@@ -81,16 +90,16 @@ mutable struct WriteBufferIterator
     buf::Ref{ipcbuf_t}
     holding_block::Bool
     function WriteBufferIterator(buf)
-        wb = new(buf, false)
         ipcbuf_lock_write(buf)
-        function cleanup(wb)
-            if wb.holding_block
-                ipcbuf_mark_filled(wb.buf, ipcbuf_get_bufsz(wb.buf))
-            end
-            ipcbuf_unlock_write(wb.buf)
-        end
-        finalizer(cleanup, wb)
+        new(buf, false)
     end
+end
+
+function cleanup(wb::WriteBufferIterator)
+    if wb.holding_block
+        ipcbuf_mark_filled(wb.buf, ipcbuf_get_bufsz(wb.buf))
+    end
+    ipcbuf_unlock_write(wb.buf)
 end
 
 function next(wb::WriteBufferIterator)
@@ -116,6 +125,11 @@ function read_iter(client::DadaClient; type=:data)
     end
 end
 
+function with_read_iter(f::Function, client::DadaClient; type=:data)
+    rb = read_iter(client; type=type)
+    f(rb)
+    cleanup(rb)
+end
 
 """
 write_iter(client)
@@ -131,5 +145,24 @@ function write_iter(client::DadaClient; type=:data)
     end
 end
 
+function with_write_iter(f::Function, client::DadaClient; type=:data)
+    wb = write_iter(client; type=type)
+    f(wb)
+    cleanup(wb)
+end
+
 # Export our API
-export DadaClient, client_connect, client_create, read_iter, write_iter, data_size, data_count, header_size, header_count, next
+export DadaClient,
+    client_connect,
+    client_create,
+    read_iter,
+    write_iter,
+    data_size,
+    data_count,
+    header_size,
+    header_count,
+    next,
+    with_write_iter,
+    with_read_iter,
+    cleanup,
+    with_client
