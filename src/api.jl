@@ -1,3 +1,11 @@
+"""
+DadaClient
+
+The handle to the DADA buffer context.
+Your best bet is to use this with `with_client` so
+everything is cleaned up properly. Otherwise, you need
+to make sure to call `cleanup`.
+"""
 mutable struct DadaClient
     key::Int32
     allocated::Bool
@@ -5,6 +13,11 @@ mutable struct DadaClient
     data::Ref{ipcbuf_t}
 end
 
+"""
+    cleanup(client)
+
+Destroy all the buffers we've allocated (if we did)
+"""
 function cleanup(client::DadaClient)
     if client.allocated
         ipcbuf_destroy(client.header)
@@ -45,18 +58,52 @@ function client_create(key::Integer, data_size::Integer, data_count::Integer, he
     DadaClient(key, true, header, data)
 end
 
+"""
+    with_client(f,key)
+
+Connect to a client with `key` and run the function `f` with
+the connected client as it's input. This will automatically perform
+cleanup after `f` completes. It's best to use this with the `do` syntax.
+
+# Example
+```julia
+with_client(key) do client
+    # Do things with client
+end
+```
+"""
 function with_client(f::Function, key::Integer)
     client = client_connect(key)
     f(client)
     cleanup(client)
 end
 
+"""
+    with_client(f, key, data_size, data_count, header_size, header_count))
+
+Create a client with `key` and parameters and run the function `f` with
+the connected client as it's input. This will automatically perform
+cleanup after `f` completes. It's best to use this with the `do` syntax.
+
+# Example
+```julia
+with_client(key, data_size, data_count, header_size, header_count) do client
+    # Do things with client
+end
+```
+"""
 function with_client(f::Function, key::Integer, data_size::Integer, data_count::Integer, header_size::Integer, header_count::Integer)
     client = client_create(key, data_size, data_count, header_size, header_count)
     f(client)
     cleanup(client)
 end
 
+"""
+The iterable over read windows of a connected client.
+
+It's best to get one of these with the context-managed `with_read_iter`,
+otherwise you need to call `cleanup` when you're done.
+"""
 mutable struct ReadBufferIterator
     buf::Ref{ipcbuf_t}
     holding_block::Bool
@@ -66,6 +113,11 @@ mutable struct ReadBufferIterator
     end
 end
 
+"""
+    cleanup(rb)
+
+Cleanup dangling read buffer iterators
+"""
 function cleanup(rb::ReadBufferIterator)
     if rb.holding_block
         ipcbuf_mark_cleared(rb.buf)
@@ -73,6 +125,11 @@ function cleanup(rb::ReadBufferIterator)
     ipcbuf_unlock_read(rb.buf)
 end
 
+"""
+    next(rb)
+
+Grab the next block of bytes we can read from
+"""
 function next(rb::ReadBufferIterator)
     if rb.holding_block
         ipcbuf_mark_cleared(rb.buf)
@@ -86,6 +143,12 @@ function next(rb::ReadBufferIterator)
     ipcbuf_get_next_read(rb.buf)
 end
 
+"""
+The iterable over writeable windows of a connected client.
+
+It's best to get one of these with the context-managed `with_write_iter`,
+otherwise you need to call `cleanup` when you're done.
+"""
 mutable struct WriteBufferIterator
     buf::Ref{ipcbuf_t}
     holding_block::Bool
@@ -95,6 +158,11 @@ mutable struct WriteBufferIterator
     end
 end
 
+"""
+    cleanup(wb)
+
+Cleanup dangling write buffer iterators
+"""
 function cleanup(wb::WriteBufferIterator)
     if wb.holding_block
         ipcbuf_mark_filled(wb.buf, ipcbuf_get_bufsz(wb.buf))
@@ -102,6 +170,11 @@ function cleanup(wb::WriteBufferIterator)
     ipcbuf_unlock_write(wb.buf)
 end
 
+"""
+    next(wb)
+
+Grab the next block of bytes we can write to
+"""
 function next(wb::WriteBufferIterator)
     if wb.holding_block
         ipcbuf_mark_filled(wb.buf, ipcbuf_get_bufsz(wb.buf))
@@ -125,6 +198,18 @@ function read_iter(client::DadaClient; type=:data)
     end
 end
 
+"""
+    with_read_iter(f, client)
+
+Create a context-managed `ReadBufferIterator` and pass it to `f`. Use this
+with the `do` syntax:
+
+```julia
+with_read_iter(client) do rb
+    rb.next() # ...
+end
+```
+"""
 function with_read_iter(f::Function, client::DadaClient; type=:data)
     rb = read_iter(client; type=type)
     f(rb)
@@ -145,6 +230,18 @@ function write_iter(client::DadaClient; type=:data)
     end
 end
 
+"""
+with_write_iter(f, client)
+
+Create a context-managed `WriteBufferIterator` and pass it to `f`. Use this
+with the `do` syntax:
+
+```julia
+with_write_iter(client) do wb
+    wb.next() # ...
+end
+```
+"""
 function with_write_iter(f::Function, client::DadaClient; type=:data)
     wb = write_iter(client; type=type)
     f(wb)
